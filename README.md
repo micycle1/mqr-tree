@@ -6,6 +6,8 @@ This repository contains a Java implementation of the **MQR-Tree**, a 2D spatial
 
 If you're familiar with the R-tree, you'll find the MQR-Tree to be a more optimized and efficient alternative.
 
+Amusingly, the "MQ" is never defined by the authors – it _probably_ stands for "Multi-Quadrant".
+
 ---
 
 ## What is the MQR-Tree?
