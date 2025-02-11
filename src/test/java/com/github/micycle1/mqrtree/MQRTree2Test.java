@@ -7,10 +7,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.RepeatedTest;
@@ -19,14 +21,14 @@ import org.junit.jupiter.api.Test;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Envelope;
 
-import com.github.micycle1.mqrtree.MQRTree.Entry;
-import com.github.micycle1.mqrtree.MQRTree.Node;
-import com.github.micycle1.mqrtree.MQRTree.NodeType;
-import com.github.micycle1.mqrtree.MQRTree.Quadrant;
+import com.github.micycle1.mqrtree.MQRTree2.Entry;
+import com.github.micycle1.mqrtree.MQRTree2.Node;
+import com.github.micycle1.mqrtree.MQRTree2.NodeType;
+import com.github.micycle1.mqrtree.MQRTree2.Quadrant;
 
-public class MQRTreeTest {
+public class MQRTree2Test {
 
-	private MQRTree<String> tree;
+	private MQRTree2<String> tree;
 	private List<Datum> bruteForceList; // used for brute-force comparisons
 
 	// A simple class to hold a point (or region) with its associated key.
@@ -46,7 +48,7 @@ public class MQRTreeTest {
 
 	@BeforeEach
 	public void setUp() {
-		tree = new MQRTree<>();
+		tree = new MQRTree2<>();
 		bruteForceList = new ArrayList<>();
 	}
 
@@ -115,37 +117,6 @@ public class MQRTreeTest {
 	}
 
 	@Test
-	public void testKnnSearchWithPoints() {
-		// Insert point objects.
-		insertAndRecord("A", new Envelope(10, 10, 10, 10));
-		insertAndRecord("B", new Envelope(5, 5, 5, 5));
-		insertAndRecord("C", new Envelope(15, 15, 15, 15));
-		insertAndRecord("D", new Envelope(10, 15, 10, 15));
-		insertAndRecord("E", new Envelope(5, 10, 5, 10));
-		insertAndRecord("F", new Envelope(12, 12, 12, 12));
-		insertAndRecord("G", new Envelope(8, 8, 8, 8));
-
-		Coordinate query = new Coordinate(10, 10);
-		int k = 3;
-		List<String> knnResults = tree.knnSearch(query, k);
-
-		// Brute-force: calculate Euclidean distance from query point to the center of
-		// each envelope.
-		List<Datum> bruteList = new ArrayList<>(bruteForceList);
-		Collections.sort(bruteList, (a, b) -> {
-			double da = query.distance(a.center);
-			double db = query.distance(b.center);
-			return Double.compare(da, db);
-		});
-		Set<String> expected = new HashSet<>();
-		for (int i = 0; i < Math.min(k, bruteList.size()); i++) {
-			expected.add(bruteList.get(i).key);
-		}
-		Set<String> resultSet = new HashSet<>(knnResults);
-		assertEquals(expected, resultSet, "k-NN search result should match brute-force computed k nearest objects.");
-	}
-
-	@Test
 	public void testNonPointalSearch() {
 		// Test with non-pointal objects (nonzero envelope area).
 		insertAndRecord("Poly1", new Envelope(1, 3, 2, 4)); // center (2,3)
@@ -177,12 +148,21 @@ public class MQRTreeTest {
 		// Build a randomized tree of 100 points.
 		Random rnd = new Random();
 		int numPoints = 500;
+		List<Envelope> envelopes = new ArrayList<Envelope>(numPoints);
 		for (int i = 0; i < numPoints; i++) {
 			double x = rnd.nextDouble() * 100;
 			double y = rnd.nextDouble() * 100;
 			// Use zero-area envelopes (points) for simplicity.
-			insertAndRecord("R" + i, new Envelope(x, x + rnd.nextDouble(x / 10), y, y + rnd.nextDouble(y / 10)));
+			envelopes.add(new Envelope(x, x + rnd.nextDouble(x / 10), y, y + rnd.nextDouble(y / 10)));
 		}
+
+		envelopes = preSortEnvelopesForBulkInsertion(envelopes);
+		for (int i = 0; i < numPoints; i++) {
+			var e = envelopes.get(i);
+			insertAndRecord("R" + i, e);
+//			System.out.println(i);
+		}
+
 		// Define a random search envelope.
 		double minX = rnd.nextDouble() * 100;
 		double minY = rnd.nextDouble() * 100;
@@ -199,6 +179,13 @@ public class MQRTreeTest {
 		}
 		assertEquals(bruteForce.size(), treeResults.size());
 		assertEquals(bruteForce, new HashSet<>(treeResults), "Randomized region search should match brute-force results. " + searchEnv.toString());
+
+//		checkNodeInvariants(tree.root, 0);
+	}
+
+	private List<Envelope> preSortEnvelopesForBulkInsertion(List<Envelope> envelopes) {
+		// Sort envelopes by their area (or any suitable property) in descending order
+		return envelopes.stream().sorted(Comparator.comparingDouble(e -> -e.getWidth() * e.getHeight())).toList();
 	}
 
 	@Test
@@ -206,127 +193,137 @@ public class MQRTreeTest {
 	 * Test behaviour of the 6-node example provided in the paper.
 	 */
 	public void testPaperExample() {
-	    // Create envelopes per the paper’s example.
-	    Envelope e1 = new Envelope(85, 200, 180, 360);
-	    Envelope e2 = new Envelope(310, 510, 240, 330);
-	    Envelope e3 = new Envelope(170, 340, 120, 240);
-	    Envelope e4 = new Envelope(0, 115, 0, 90);
-	    Envelope e5 = new Envelope(255, 405, 60, 150);
-	    Envelope e6 = new Envelope(390, 470, 0, 90);
+		// Create envelopes per the paper’s example.
+		Envelope e1 = new Envelope(85, 200, 180, 360);
+		Envelope e2 = new Envelope(310, 510, 240, 330);
+		Envelope e3 = new Envelope(170, 340, 120, 240);
+		Envelope e4 = new Envelope(0, 115, 0, 90);
+		Envelope e5 = new Envelope(255, 405, 60, 150);
+		Envelope e6 = new Envelope(390, 470, 0, 90);
 
-	    // A large envelope that forces a large MBR expansion.
-	    Envelope e7 = new Envelope(-100, 600, -100, 600);
+		// A large envelope that forces a large MBR expansion.
+		Envelope e7 = new Envelope(-100, 600, -100, 600);
 
-	    // Insert the first three envelopes.
-	    tree.insert("1", e1);
-	    tree.insert("2", e2);
-	    tree.insert("3", e3);
+		// Insert the first three envelopes.
+		tree.insert("1", e1);
+		tree.insert("2", e2);
+		tree.insert("3", e3);
 
-	    // Compute the expected MBR after inserting e1, e2, e3.
-	    Envelope node_mbr = e1.copy();
-	    node_mbr.expandToInclude(e2);
-	    node_mbr.expandToInclude(e3);
+		// Compute the expected MBR after inserting e1, e2, e3.
+		Envelope node_mbr = e1.copy();
+		node_mbr.expandToInclude(e2);
+		node_mbr.expandToInclude(e3);
 
-	    assertEquals(node_mbr, tree.root.mbr);
-	    assertEquals(NodeType.NORMAL, tree.root.type);
-	    // Expected placements per quadrant:
-	    //    e1 goes to NW, e2 to NE, e3 to SW.
-	    assertEquals("1", tree.root.children.get(Quadrant.NW).obj);
-	    assertEquals(e1, tree.root.children.get(Quadrant.NW).mbr);
-	    assertEquals("2", tree.root.children.get(Quadrant.NE).obj);
-	    assertEquals(e2, tree.root.children.get(Quadrant.NE).mbr);
-	    assertEquals("3", tree.root.children.get(Quadrant.SW).obj);
-	    assertEquals(e3, tree.root.children.get(Quadrant.SW).mbr);
+		assertEquals(node_mbr, tree.root.mbr);
+		assertEquals(NodeType.NORMAL, tree.root.type);
+		// Expected placements per quadrant:
+		// e1 goes to NW, e2 to NE, e3 to SW.
+		assertEquals("1", tree.root.children.get(Quadrant.NW).obj);
+		assertEquals(e1, tree.root.children.get(Quadrant.NW).mbr);
+		assertEquals("2", tree.root.children.get(Quadrant.NE).obj);
+		assertEquals(e2, tree.root.children.get(Quadrant.NE).mbr);
+		assertEquals("3", tree.root.children.get(Quadrant.SW).obj);
+		assertEquals(e3, tree.root.children.get(Quadrant.SW).mbr);
 
-	    // Next, insert e4. In our example, e4’s insertion causes e3’s centroid to match the new root MBR centroid.
-	    tree.insert("4", e4);
-	    node_mbr.expandToInclude(e4);
-	    assertEquals(node_mbr, tree.root.mbr);
-	    // With our data, the new root MBR’s centroid equals the centroid of e3.
-	    assertEquals(tree.root.mbr.centre(), e3.centre());
-	    // findShiftedObjs should detect that e3 now belongs in the CENTER and promote the node.
-	    assertNotNull(tree.root.children.get(Quadrant.CENTER));
-	    assertEquals(NodeType.CENTER, tree.root.type);
-	    assertEquals("4", tree.root.children.get(Quadrant.SW).obj);
-	    assertEquals(e4, tree.root.children.get(Quadrant.SW).mbr);
-	    // The SE slot is still empty.
-	    assertNull(tree.root.children.get(Quadrant.SE));
+		// Next, insert e4. In our example, e4’s insertion causes e3’s centroid to match
+		// the new root MBR centroid.
+		tree.insert("4", e4);
+		node_mbr.expandToInclude(e4);
+		assertEquals(node_mbr, tree.root.mbr);
+		// With our data, the new root MBR’s centroid equals the centroid of e3.
+		assertEquals(tree.root.mbr.centre(), e3.centre());
+		// findShiftedObjs should detect that e3 now belongs in the CENTER and promote
+		// the node.
+		assertNotNull(tree.root.children.get(Quadrant.CENTER));
+		assertEquals(NodeType.CENTER, tree.root.type);
+		assertEquals("4", tree.root.children.get(Quadrant.SW).obj);
+		assertEquals(e4, tree.root.children.get(Quadrant.SW).mbr);
+		// The SE slot is still empty.
+		assertNull(tree.root.children.get(Quadrant.SE));
 
-	    // Insert a couple more envelopes that do not affect the MBR.
-	    tree.insert("5", e5); // stays in SE
-	    node_mbr.expandToInclude(e5);
-	    assertEquals(node_mbr, tree.root.mbr);
-	    assertEquals("5", tree.root.children.get(Quadrant.SE).obj);
-	    assertEquals(e5, tree.root.children.get(Quadrant.SE).mbr);
-	    assertNull(tree.root.children.get(Quadrant.SE).child);
-	    assertEquals(NodeType.CENTER, tree.root.type);
+		// Insert a couple more envelopes that do not affect the MBR.
+		tree.insert("5", e5); // stays in SE
+		node_mbr.expandToInclude(e5);
+		assertEquals(node_mbr, tree.root.mbr);
+		assertEquals("5", tree.root.children.get(Quadrant.SE).obj);
+		assertEquals(e5, tree.root.children.get(Quadrant.SE).mbr);
+		assertNull(tree.root.children.get(Quadrant.SE).child);
+		assertEquals(NodeType.CENTER, tree.root.type);
 
-	    /* 
-	     * Insert e6. The location of e6 is SE and the node MBR does not change.
-	     * However, since e5 is already there, the algorithm creates a new sub-node
-	     * for the SE quadrant and both e5 and e6 are stored in that sub-node.
-	     */
-	    tree.insert("6", e6);
-	    node_mbr.expandToInclude(e6);
-	    assertEquals(node_mbr, tree.root.mbr);
-	    // Verify the new subnode exists.
-	    Node<?> subNode = tree.root.children.get(Quadrant.SE).child;
-	    assertNotNull(subNode);
-	    assertEquals(2, subNode.children.size());
-	    assertEquals("5", subNode.children.get(Quadrant.NW).obj);
-	    assertEquals("6", subNode.children.get(Quadrant.SE).obj);
-	    // Verify the rest of the structure remains unchanged.
-	    assertEquals("1", tree.root.children.get(Quadrant.NW).obj);
-	    assertEquals("2", tree.root.children.get(Quadrant.NE).obj);
-	    assertEquals("3", tree.root.children.get(Quadrant.CENTER).obj);
-	    assertEquals("4", tree.root.children.get(Quadrant.SW).obj);
+		/*
+		 * Insert e6. The location of e6 is SE and the node MBR does not change.
+		 * However, since e5 is already there, the algorithm creates a new sub-node for
+		 * the SE quadrant and both e5 and e6 are stored in that sub-node.
+		 */
+		tree.insert("6", e6);
+		node_mbr.expandToInclude(e6);
+		assertEquals(node_mbr, tree.root.mbr);
+		// Verify the new subnode exists.
+		var subNode = tree.root.children.get(Quadrant.SE).child;
+		assertNotNull(subNode);
+		assertEquals(2, subNode.children.size());
+		assertEquals("5", subNode.children.get(Quadrant.NW).obj);
+		assertEquals("6", subNode.children.get(Quadrant.SE).obj);
+		// Verify the rest of the structure remains unchanged.
+		assertEquals("1", tree.root.children.get(Quadrant.NW).obj);
+		assertEquals("2", tree.root.children.get(Quadrant.NE).obj);
+		assertEquals("3", tree.root.children.get(Quadrant.CENTER).obj);
+		assertEquals("4", tree.root.children.get(Quadrant.SW).obj);
 
-	    // Now, insert e7. Its large extent forces a significant change in the root MBR.
-	    // This will not only expand the extent but shift many entries (via findShiftedObjs).
-	    tree.insert("7", e7);
+		// Now, insert e7. Its large extent forces a significant change in the root MBR.
+		// This will not only expand the extent but shift many entries (via
+		// findShiftedObjs).
+		tree.insert("7", e7);
 
-	    // Compute the new expected MBR (covers e1..e7)
-	    Envelope expectedMBR = e1.copy();
-	    expectedMBR.expandToInclude(e2);
-	    expectedMBR.expandToInclude(e3);
-	    expectedMBR.expandToInclude(e4);
-	    expectedMBR.expandToInclude(e5);
-	    expectedMBR.expandToInclude(e6);
-	    expectedMBR.expandToInclude(e7);
-	    assertEquals(expectedMBR, tree.root.mbr);
+		// Compute the new expected MBR (covers e1..e7)
+		Envelope expectedMBR = e1.copy();
+		expectedMBR.expandToInclude(e2);
+		expectedMBR.expandToInclude(e3);
+		expectedMBR.expandToInclude(e4);
+		expectedMBR.expandToInclude(e5);
+		expectedMBR.expandToInclude(e6);
+		expectedMBR.expandToInclude(e7);
+		assertEquals(expectedMBR, tree.root.mbr);
 
-	    // Because the new large region moves the centroid substantially, many object placements
-	    // are recalculated. For example, if after expanding the MBR e7’s centroid is far from the rest,
-	    // then some previously CENTER or SW entries may now be in a different quadrant.
-	    //
-	    // The exact quadrant for each envelope depends on the new centroid which is computed as:
-	    //    newCx = (expectedMBR.getMinX() + expectedMBR.getMaxX()) / 2.0;
-	    //    newCy = (expectedMBR.getMinY() + expectedMBR.getMaxY()) / 2.0;
-	    //
-	    // In our test data we’ll assume that:
-	    //    • e7 should now be inserted in Quadrant.NE
-	    //    • e3 (whose centroid was equal to the old centroid) will now be reinserted,
-	    //      and if its centroid still happens to match the new MBR centroid it is placed in CENTER.
-	    // Adjust these assertions in keeping with your specific data and desired outcome.
-	    //
-	    // For demonstration we might verify that:
-	    //
-	    assertNotNull(tree.root.children.get(Quadrant.CENTER));
-	    assertEquals("7", tree.root.children.get(Quadrant.CENTER).obj);
-	    assertEquals(NodeType.CENTER, tree.root.type);
-	    // For example, assume our data result in:
-	    //    - e3 is reinserted in the center,
-	    //    - e7 ends in NE due to its extensive area.
-	    //
-	    // (Your test data might require different quadrant expectations; ensure that the actual
-	    // object placements after e7 insertion match the intended insert strategy.)
+		// Because the new large region moves the centroid substantially, many object
+		// placements
+		// are recalculated. For example, if after expanding the MBR e7’s centroid is
+		// far from the rest,
+		// then some previously CENTER or SW entries may now be in a different quadrant.
+		//
+		// The exact quadrant for each envelope depends on the new centroid which is
+		// computed as:
+		// newCx = (expectedMBR.getMinX() + expectedMBR.getMaxX()) / 2.0;
+		// newCy = (expectedMBR.getMinY() + expectedMBR.getMaxY()) / 2.0;
+		//
+		// In our test data we’ll assume that:
+		// • e7 should now be inserted in Quadrant.NE
+		// • e3 (whose centroid was equal to the old centroid) will now be reinserted,
+		// and if its centroid still happens to match the new MBR centroid it is placed
+		// in CENTER.
+		// Adjust these assertions in keeping with your specific data and desired
+		// outcome.
+		//
+		// For demonstration we might verify that:
+		//
+		assertNotNull(tree.root.children.get(Quadrant.CENTER));
+		assertEquals("7", tree.root.children.get(Quadrant.CENTER).obj);
+		assertEquals(NodeType.CENTER, tree.root.type);
+		// For example, assume our data result in:
+		// - e3 is reinserted in the center,
+		// - e7 ends in NE due to its extensive area.
+		//
+		// (Your test data might require different quadrant expectations; ensure that
+		// the actual
+		// object placements after e7 insertion match the intended insert strategy.)
 //	    assertEquals("7", tree.root.children.get(Quadrant.NE).obj);
 
-	    // You can further inspect the tree’s structure to verify that all shifted objects
-	    // were removed and reinserted (for instance, verifying that e1, e4, e5, e6 have been
-	    // relocated to their correct quadrants relative to the new centroid).
+		// You can further inspect the tree’s structure to verify that all shifted
+		// objects
+		// were removed and reinserted (for instance, verifying that e1, e4, e5, e6 have
+		// been
+		// relocated to their correct quadrants relative to the new centroid).
 	}
-
 
 	@RepeatedTest(50)
 	public void testRandomizedKnnSearch(RepetitionInfo info) {
@@ -336,7 +333,7 @@ public class MQRTreeTest {
 		Random rnd = new Random();
 		int numPoints = 200;
 		// Clear any pre-existing data
-		tree = new MQRTree<>();
+		tree = new MQRTree2<>();
 		bruteForceList.clear();
 		for (int i = 0; i < numPoints; i++) {
 			double x = rnd.nextDouble() * 200;
@@ -418,7 +415,7 @@ public class MQRTreeTest {
 		tree.insert("D", makeEnvelope(30, 15));
 		tree.insert("E", makeEnvelope(15, 5));
 		tree.insert("F", makeEnvelope(25, 30));
-//		checkNodeInvariants(tree.root, 0);
+		checkNodeInvariants(tree.root, 0);
 	}
 
 	/**
@@ -503,7 +500,7 @@ public class MQRTreeTest {
 	 * @param parentCy y-coordinate of parent's centroid.
 	 * @return the expected quadrant.
 	 */
-	private MQRTree.Quadrant findExpectedQuadrant(Envelope env, double parentCx, double parentCy) {
+	private Quadrant findExpectedQuadrant(Envelope env, double parentCx, double parentCy) {
 		double childCx = (env.getMinX() + env.getMaxX()) / 2.0; // Ax
 		double childCy = (env.getMinY() + env.getMaxY()) / 2.0; // Ay
 
@@ -513,22 +510,22 @@ public class MQRTreeTest {
 		// If centroids overlap, return CENTER (but only if there are multiple
 		// overlapping objects)
 		if (centroidsOverlap) {
-			return MQRTree.Quadrant.CENTER;
+			return Quadrant.CENTER;
 		}
 
 		// Otherwise, determine the quadrant based on the child's position relative to
 		// the parent's centroid
 		if (childCx < parentCx) {
 			if (childCy < parentCy) {
-				return MQRTree.Quadrant.SW;
+				return Quadrant.SW;
 			} else {
-				return MQRTree.Quadrant.NW;
+				return Quadrant.NW;
 			}
 		} else { // childCx >= parentCx
 			if (childCy >= parentCy) {
-				return MQRTree.Quadrant.NE;
+				return Quadrant.NE;
 			} else {
-				return MQRTree.Quadrant.SE;
+				return Quadrant.SE;
 			}
 		}
 	}

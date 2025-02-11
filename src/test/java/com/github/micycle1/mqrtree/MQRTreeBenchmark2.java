@@ -12,9 +12,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.Envelope;
 
-public class MQRTreeBenchmark {
+public class MQRTreeBenchmark2 {
 
-	private MQRTree<String> tree;
+	private MQRTree2<String> tree;
 	private List<Datum> bruteForceList; // used for brute-force comparisons
 
 	// A simple class to hold a point (or region) with its associated key.
@@ -34,7 +34,7 @@ public class MQRTreeBenchmark {
 
 	@BeforeEach
 	public void setUp() {
-		tree = new MQRTree<>();
+		tree = new MQRTree2<>();
 		bruteForceList = new ArrayList<>();
 	}
 

@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * MQRTree spatial index.
+ * MQR-Tree spatial index.
  *
  * @param <T> the type of object stored in the tree.
  * @author Michael Carleton
@@ -233,22 +233,6 @@ public class MQRTree<T> {
 	    }
 	}
 
-
-
-	/**
-	 * Adjust (or recalc) the node’s MBR based on its children. If the node has no
-	 * children, the MBR is set to an empty envelope.
-	 *
-	 * @param node the node to adjust.
-	 */
-	private void adjustNode(Node<T> node) {
-		Envelope newMBR = new Envelope();
-		for (Entry<T> entry : node.children.values()) {
-			newMBR.expandToInclude(entry.mbr);
-		}
-		node.mbr = newMBR;
-	}
-
 	/* ===================== Supporting Classes ==================== */
 
 	/**
@@ -365,7 +349,7 @@ public class MQRTree<T> {
 		public SearchCandidate(T obj, double distance, Envelope mbr) {
 			this.obj = obj;
 			this.distance = distance;
-			this.mbr = new Envelope(mbr);
+//			this.mbr = new Envelope(mbr);
 		}
 
 		@Override
